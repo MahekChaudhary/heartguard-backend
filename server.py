@@ -512,66 +512,65 @@ async def get_me(user: dict = Depends(get_current_user)):
 
 @api_router.post("/predict", response_model=PredictionResult)
 async def predict(input_data: PredictionInput, user: dict = Depends(get_current_user)):
-    if not ML_MODELS or not SCALER:
-        raise HTTPException(status_code=500, detail="ML models not loaded")
+    try:
+        if not ML_MODELS or not SCALER:
+            raise HTTPException(status_code=500, detail="ML models not loaded")
 
-    # ✅ FIX 3: numpy array ki jagah DataFrame — SVM feature names error fix
-    features_df = pd.DataFrame([{
-        'age':      input_data.age,
-        'sex':      input_data.sex,
-        'cp':       input_data.cp,
-        'trestbps': input_data.trestbps,
-        'chol':     input_data.chol,
-        'fbs':      input_data.fbs,
-        'restecg':  input_data.restecg,
-        'thalch':   input_data.thalch,
-        'exang':    input_data.exang,
-        'oldpeak':  input_data.oldpeak,
-    }])
+        features_df = pd.DataFrame([{
+            'age': input_data.age, 'sex': input_data.sex,
+            'cp': input_data.cp, 'trestbps': input_data.trestbps,
+            'chol': input_data.chol, 'fbs': input_data.fbs,
+            'restecg': input_data.restecg, 'thalch': input_data.thalch,
+            'exang': input_data.exang, 'oldpeak': input_data.oldpeak,
+        }])
 
-    scaled_array = SCALER.transform(features_df)
-    scaled_features = pd.DataFrame(scaled_array, columns=FEATURE_NAMES)
+        scaled_array = SCALER.transform(features_df)
+        scaled_features = pd.DataFrame(scaled_array, columns=FEATURE_NAMES)
 
-    model_predictions = {}
-    probabilities = {}
-    
-    for model_name, model in ML_MODELS.items():
-        try:
-            prediction = int(model.predict(scaled_features)[0])
-            if hasattr(model, 'predict_proba'):
-                proba = model.predict_proba(scaled_features)[0]
-                prob_positive = float(proba[1]) if len(proba) > 1 else float(proba[0])
-            else:
-                prob_positive = float(prediction)
-            
-            probabilities[model_name] = prob_positive
-            model_predictions[model_name] = {
-                "prediction": prediction,
-                "probability": round(prob_positive * 100, 2),
-                "metrics": MODEL_METRICS.get(model_name, {})
-            }
-        except Exception as e:
-            logging.error(f"Error with model {model_name}: {e}")
-            model_predictions[model_name] = {"error": str(e)}
-    
-    risk_score = calculate_risk_score(probabilities)
-    risk_level = get_risk_level(risk_score)
-    recommendations = get_recommendations(risk_level)
-    
-    prediction_id = str(uuid.uuid4())
-    prediction_doc = {
-        'id': prediction_id,
-        'user_id': user['id'],
-        'input_data': input_data.model_dump(),
-        'risk_score': risk_score,
-        'risk_level': risk_level,
-        'model_predictions': model_predictions,
-        'recommendations': recommendations,
-        'created_at': datetime.now(timezone.utc).isoformat()
-    }
-    await db.predictions.insert_one(prediction_doc)
-    
-    return PredictionResult(**{k: v for k, v in prediction_doc.items() if k != '_id'})
+        model_predictions = {}
+        probabilities = {}
+
+        for model_name, model in ML_MODELS.items():
+            try:
+                prediction = int(model.predict(scaled_features)[0])
+                if hasattr(model, 'predict_proba'):
+                    proba = model.predict_proba(scaled_features)[0]
+                    prob_positive = float(proba[1]) if len(proba) > 1 else float(proba[0])
+                else:
+                    prob_positive = float(prediction)
+                probabilities[model_name] = prob_positive
+                model_predictions[model_name] = {
+                    "prediction": prediction,
+                    "probability": round(prob_positive * 100, 2),
+                    "metrics": MODEL_METRICS.get(model_name, {})
+                }
+            except Exception as e:
+                logging.error(f"Error with model {model_name}: {e}")
+                model_predictions[model_name] = {"error": str(e)}
+
+        risk_score = calculate_risk_score(probabilities)
+        risk_level = get_risk_level(risk_score)
+        recommendations = get_recommendations(risk_level)
+
+        prediction_id = str(uuid.uuid4())
+        prediction_doc = {
+            'id': prediction_id,
+            'user_id': user['id'],
+            'input_data': input_data.model_dump(),
+            'risk_score': risk_score,
+            'risk_level': risk_level,
+            'model_predictions': model_predictions,
+            'recommendations': recommendations,
+            'created_at': datetime.now(timezone.utc).isoformat()
+        }
+        await db.predictions.insert_one(prediction_doc)
+        return PredictionResult(**{k: v for k, v in prediction_doc.items() if k != '_id'})
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"PREDICT ERROR: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @api_router.get("/predictions", response_model=List[PredictionResult])
 async def get_predictions(user: dict = Depends(get_current_user)):
