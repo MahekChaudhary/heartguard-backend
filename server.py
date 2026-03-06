@@ -27,11 +27,10 @@ db = client[os.environ['DB_NAME']]
 # Create the main app
 app = FastAPI(title="HeartGuard AI API")
 
-# ✅ FIX 2: CORS — sabse pehle, credentials=False, env se origins lo
-cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',')
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
